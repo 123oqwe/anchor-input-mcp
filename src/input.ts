@@ -15,6 +15,43 @@ import fs from "node:fs";
 
 const PLATFORM = process.platform;
 
+// ── App blocklist (Codex-style safety) ─────────────────────────────────────
+// Apps where keystroke / click / typing should NEVER fire. Includes:
+//   - terminals (could let agent run arbitrary commands)
+//   - password managers (don't fish out passwords)
+//   - banking / financial apps (don't initiate transfers)
+// Override with ANCHOR_INPUT_BLOCKED_APPS=app1,app2,... (replaces defaults).
+// Add to defaults via ANCHOR_INPUT_EXTRA_BLOCKED=app3,app4
+const DEFAULT_BLOCKED_APPS = new Set([
+  "Terminal", "iTerm", "iTerm2", "Warp", "Hyper", "kitty", "Alacritty", "WezTerm",
+  "1Password", "1Password 7", "Bitwarden", "LastPass", "Dashlane", "Keeper", "KeePassXC",
+  "Banking", "Mint", "Personal Capital",
+]);
+
+function blockedApps(): Set<string> {
+  if (process.env.ANCHOR_INPUT_BLOCKED_APPS) {
+    return new Set(process.env.ANCHOR_INPUT_BLOCKED_APPS.split(",").map(s => s.trim()).filter(Boolean));
+  }
+  const set = new Set(DEFAULT_BLOCKED_APPS);
+  if (process.env.ANCHOR_INPUT_EXTRA_BLOCKED) {
+    for (const a of process.env.ANCHOR_INPUT_EXTRA_BLOCKED.split(",").map(s => s.trim()).filter(Boolean)) set.add(a);
+  }
+  return set;
+}
+
+async function getActiveAppName(): Promise<string | null> {
+  if (PLATFORM !== "darwin") return null;  // only Mac has reliable cross-app focus check
+  const r = safeExec(`osascript -e 'tell application "System Events" to name of first application process whose frontmost is true'`, { timeout: 1500 });
+  return r.ok ? r.stdout.trim() : null;
+}
+
+function isAppBlocked(appName: string | null): { blocked: boolean; reason?: string } {
+  if (!appName) return { blocked: false };
+  const list = blockedApps();
+  if (list.has(appName)) return { blocked: true, reason: `app '${appName}' is in the blocklist (sensitive: terminal/password/banking)` };
+  return { blocked: false };
+}
+
 function safeExec(cmd: string, opts: { timeout?: number } = {}): { ok: boolean; stdout: string; stderr: string } {
   try {
     const stdout = execSync(cmd, { timeout: opts.timeout ?? 5000, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
@@ -36,6 +73,7 @@ export interface InputStatus {
   platform: NodeJS.Platform;
   capabilities: { keystroke: boolean; click: boolean; typeText: boolean; screenshot: boolean };
   toolsDetected: Record<string, boolean>;
+  blockedApps: string[];
   notes: string[];
 }
 
@@ -81,13 +119,15 @@ export function inputStatus(): InputStatus {
     notes.push(`Unsupported platform: ${PLATFORM}`);
   }
 
-  return { platform: PLATFORM, capabilities: { keystroke, click, typeText, screenshot }, toolsDetected: tools, notes };
+  return { platform: PLATFORM, capabilities: { keystroke, click, typeText, screenshot }, toolsDetected: tools, blockedApps: Array.from(blockedApps()), notes };
 }
 
 // ── Keystroke (modifier+key combos like cmd+c, ctrl+t) ─────────────────────
 
-export function inputKeystroke(combo: string): { ok: boolean; error?: string } {
+export async function inputKeystroke(combo: string): Promise<{ ok: boolean; error?: string }> {
   // combo format: "cmd+c", "ctrl+shift+t", "esc", "return"
+  const blocked = isAppBlocked(await getActiveAppName());
+  if (blocked.blocked) return { ok: false, error: `[anchor-input-mcp] BLOCKED: ${blocked.reason}` };
   if (PLATFORM === "darwin") {
     const { keys, mods } = parseMacCombo(combo);
     const using = mods.length ? ` using {${mods.join(", ")}}` : "";
@@ -160,8 +200,10 @@ function comboToSendKeys(combo: string): string {
 
 // ── Type text (long string) ────────────────────────────────────────────────
 
-export function inputTypeText(text: string): { ok: boolean; error?: string } {
+export async function inputTypeText(text: string): Promise<{ ok: boolean; error?: string }> {
   if (text.length > 2000) return { ok: false, error: "text too long (max 2000 chars)" };
+  const blocked = isAppBlocked(await getActiveAppName());
+  if (blocked.blocked) return { ok: false, error: `[anchor-input-mcp] BLOCKED: ${blocked.reason}` };
   if (PLATFORM === "darwin") {
     const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/'/g, "'\\''");
     const r = safeExec(`osascript -e 'tell application "System Events" to keystroke "${escaped}"'`, { timeout: 10000 });
@@ -184,6 +226,8 @@ export function inputTypeText(text: string): { ok: boolean; error?: string } {
 // ── Click at coords ─────────────────────────────────────────────────────────
 
 export async function inputClick(x: number, y: number, button: "left" | "right" = "left"): Promise<{ ok: boolean; error?: string }> {
+  const blocked = isAppBlocked(await getActiveAppName());
+  if (blocked.blocked) return { ok: false, error: `[anchor-input-mcp] BLOCKED: ${blocked.reason}` };
   if (PLATFORM === "darwin") {
     if (checkBinary("cliclick")) {
       const flag = button === "right" ? "rc" : "c";

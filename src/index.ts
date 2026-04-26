@@ -84,12 +84,12 @@ async function callTool(name: string, args: Record<string, any>): Promise<string
   switch (name) {
     case "input_keystroke": {
       if (!args.combo) throw new Error("combo required");
-      const r = inputKeystroke(String(args.combo));
+      const r = await inputKeystroke(String(args.combo));
       return JSON.stringify(r, null, 2);
     }
     case "input_type_text": {
       if (typeof args.text !== "string") throw new Error("text required");
-      const r = inputTypeText(args.text);
+      const r = await inputTypeText(args.text);
       return JSON.stringify(r, null, 2);
     }
     case "input_click": {
