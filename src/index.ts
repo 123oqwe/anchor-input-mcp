@@ -96,7 +96,7 @@ async function callTool(name: string, args: Record<string, any>): Promise<string
       const x = Number(args.x), y = Number(args.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("x, y required (numbers)");
       const button = args.button === "right" ? "right" : "left";
-      const r = inputClick(x, y, button);
+      const r = await inputClick(x, y, button);
       return JSON.stringify(r, null, 2);
     }
     case "input_screenshot": {

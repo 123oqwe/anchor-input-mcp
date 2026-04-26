@@ -60,9 +60,12 @@ export function inputStatus(): InputStatus {
     keystroke = tools.powershell;
     typeText = tools.powershell;
     screenshot = tools.powershell;
-    click = false;  // best-effort — would require nut-js native binding
-    if (!tools.powershell) notes.push("powershell not found — Windows input unavailable");
-    notes.push("Click-at-coords on Windows is best-effort — install @anchor/input-mcp-win-extras for nut-js binding");
+    // Optional nut-js for clicks — probed on first inputClick() call rather
+    // than at module load (avoids paying the import cost when never used).
+    tools["nut-js"] = false;  // best-effort flag — true value reported per-call
+    click = true;             // optimistic; if missing, inputClick errors clearly
+    notes.push("Win click uses optional `@nut-tree-fork/nut-js` — install it if not yet (npm i -g)");
+    if (!tools.powershell) notes.push("powershell not found — Windows keystroke / type / screenshot unavailable");
   } else if (PLATFORM === "linux") {
     tools.xdotool = checkBinary("xdotool");
     tools.scrot = checkBinary("scrot");
@@ -180,7 +183,7 @@ export function inputTypeText(text: string): { ok: boolean; error?: string } {
 
 // ── Click at coords ─────────────────────────────────────────────────────────
 
-export function inputClick(x: number, y: number, button: "left" | "right" = "left"): { ok: boolean; error?: string } {
+export async function inputClick(x: number, y: number, button: "left" | "right" = "left"): Promise<{ ok: boolean; error?: string }> {
   if (PLATFORM === "darwin") {
     if (checkBinary("cliclick")) {
       const flag = button === "right" ? "rc" : "c";
@@ -197,7 +200,20 @@ export function inputClick(x: number, y: number, button: "left" | "right" = "lef
     return r.ok ? { ok: true } : { ok: false, error: r.stderr };
   }
   if (PLATFORM === "win32") {
-    return { ok: false, error: "Click-at-coords not implemented on Windows in v0.1 — use input_keystroke + Tab navigation, or install nut-js" };
+    // Try @nut-tree-fork/nut-js if installed (optional native dep). Falls back
+    // to a clear error if user hasn't installed the optional package.
+    try {
+      // @ts-ignore — optional Win-only dep; not declared in package.json deps
+      const nut: any = await import("@nut-tree-fork/nut-js").catch(() => null);
+      if (nut?.mouse && nut?.Point && nut?.Button) {
+        await nut.mouse.move(nut.straightTo(new nut.Point(x, y)));
+        await nut.mouse.click(button === "right" ? nut.Button.RIGHT : nut.Button.LEFT);
+        return { ok: true };
+      }
+    } catch (err: any) {
+      return { ok: false, error: `nut-js click failed: ${err?.message ?? err}` };
+    }
+    return { ok: false, error: "Win click requires `npm i -g @nut-tree-fork/nut-js`. After install, restart anchor-input-mcp." };
   }
   return { ok: false, error: `unsupported platform ${PLATFORM}` };
 }
