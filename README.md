@@ -42,7 +42,17 @@ npx -y @anchor/input-mcp
 ### Windows notes
 
 - v0.1: keystroke / type / screenshot work via PowerShell.
-- Click-at-coords requires `nut-js` native binding — not bundled. Use `input_keystroke` + Tab/Enter for now, or PR welcome to add nut-js dispatcher.
+- Click-at-coords requires `nut-js` native binding — **planned for v0.2**.
+  Workaround: use `input_keystroke` ('tab', 'return', 'space') for nav.
+- PR welcome to add nut-js dispatcher under `src/input-win.ts`.
+
+## Roadmap
+
+| version | scope |
+|---------|------|
+| 0.1 (current) | Mac full · Linux full · Win partial (no click) |
+| 0.2 | + Win click via nut-js |
+| 0.3 | + screenshot region by element ID (works with anchor-screen-mcp's "find element" output) |
 
 ## Use with anchor-backend
 
